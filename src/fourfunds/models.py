@@ -35,6 +35,11 @@ class MarketQuote:
     quote_turnover_24h: Decimal
 
 
+class CandleSource(str, Enum):
+    EXCHANGE_OHLC = "exchange_ohlc"
+    SAMPLED_SNAPSHOT = "sampled_snapshot"
+
+
 @dataclass(frozen=True)
 class Candle:
     pair: str
@@ -45,6 +50,15 @@ class Candle:
     low: Decimal
     close: Decimal
     volume: Decimal
+    source: CandleSource = CandleSource.EXCHANGE_OHLC
+
+
+@dataclass(frozen=True)
+class MarketHistory:
+    pair: str
+    candles: tuple[Candle, ...]
+    close_series: tuple[tuple[int, Decimal], ...]
+    hourly_returns: tuple[tuple[int, Decimal], ...]
 
 
 @dataclass(frozen=True)
