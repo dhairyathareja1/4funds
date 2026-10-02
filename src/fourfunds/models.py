@@ -61,6 +61,17 @@ class WalletSnapshot:
 
 
 @dataclass(frozen=True)
+class PendingOrderSummary:
+    total_pending: int
+    order_pairs: tuple[tuple[str, int], ...]
+
+
+@dataclass(frozen=True)
+class CancellationResult:
+    order_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class TargetWeight:
     pair: str
     weight: Decimal
