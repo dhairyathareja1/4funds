@@ -87,7 +87,7 @@ class CancellationResult:
 
 @dataclass(frozen=True)
 class TargetWeight:
-    pair: str
+    pair: str | None
     weight: Decimal
     reason: str
 
