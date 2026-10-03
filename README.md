@@ -2,11 +2,11 @@
 
 4Funds is a modular trading-bot project for the Roostoo APAC University Quant Trading Hackathon.
 
-The repository is starting with a safe v0 scaffold. The modules and interfaces are in place, but the trading strategy, API integration, order execution, and backtest are not implemented yet. The initial CLI makes no network requests and places no orders.
+The repository implements validated settings, the Roostoo API client, market-history storage, and the v0 baseline strategy. Order execution and backtesting are not implemented yet. The CLI makes no network requests and places no orders.
 
-## v0 strategy plan
+## v0 strategy
 
-The planned baseline is a low-frequency, long-or-cash trend strategy. It will consider tradable, liquid assets; favor assets with positive recent momentum that remain above a recent trend average; and hold cash when no assets qualify. Risk controls will cap exposure. The parameters below are starting defaults; backtest results will be documented after implementation.
+The baseline is a deterministic, long-only hourly trend strategy. A pair must be tradable, meet the configured 24-hour quote-turnover minimum, and have enough contiguous hourly candles. Its current quote must have positive momentum over the configured lookback and sit above the simple average of the configured number of latest hourly closes. Qualifying pairs are ranked by momentum, with pair name breaking ties, and the top `top_k` receive equal target weights. If no pair qualifies, the strategy returns a full-cash target (`pair=None`) with a reason. Each asset target records its momentum, trend check, and rank. Risk controls will cap exposure; backtest results will be documented separately.
 
 ## Project layout
 
