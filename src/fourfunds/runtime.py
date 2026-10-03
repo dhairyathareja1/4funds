@@ -11,9 +11,12 @@ from typing import Callable, Protocol, TypeVar
 from fourfunds.api import RoostooAPIError, RoostooClient
 from fourfunds.data import (
     DEFAULT_MAX_DATA_AGE_MS,
+    HOUR_MS,
+    InsufficientMarketHistoryError,
     MarketDataError,
     MarketDataStore,
     StaleMarketDataError,
+    load_historical_candles,
 )
 from fourfunds.execution import Executor, ReconciliationReport
 from fourfunds.models import (
@@ -309,6 +312,7 @@ class BotRunner:
         histories: dict[str, object] = {}
         errors: dict[str, str] = {}
         stale_pairs: list[str] = []
+        insufficient_pairs: list[str] = []
         for pair in sorted(quotes):
             try:
                 history = self._market_data.get_market_history(
@@ -323,9 +327,43 @@ class BotRunner:
                 continue
             except MarketDataError as exc:
                 errors[pair] = str(exc)
+                if isinstance(exc, InsufficientMarketHistoryError):
+                    insufficient_pairs.append(pair)
                 continue
             candles[pair] = history.candles
             histories[pair] = history
+
+        history_source = self._settings.market_history_csv
+        if insufficient_pairs and history_source:
+            window_end_ms = end_time_ms // HOUR_MS * HOUR_MS
+            window_start_ms = window_end_ms - window_hours * HOUR_MS
+            source_candles = load_historical_candles(history_source)
+            for pair in insufficient_pairs:
+                missing_window = tuple(
+                    candle
+                    for candle in source_candles
+                    if candle.pair == pair
+                    and window_start_ms <= candle.open_time_ms < window_end_ms
+                )
+                self._market_data.record_candles_if_missing(missing_window)
+
+            for pair in insufficient_pairs:
+                try:
+                    history = self._market_data.get_market_history(
+                        pair,
+                        end_time_ms=end_time_ms,
+                        window_hours=window_hours,
+                        max_age_ms=DEFAULT_MAX_DATA_AGE_MS,
+                    )
+                except StaleMarketDataError as exc:
+                    errors[pair] = str(exc)
+                    stale_pairs.append(pair)
+                except MarketDataError as exc:
+                    errors[pair] = str(exc)
+                else:
+                    errors.pop(pair, None)
+                    candles[pair] = history.candles
+                    histories[pair] = history
         return candles, histories, errors, tuple(stale_pairs)
 
     def _advance_risk_state(

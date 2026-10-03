@@ -49,6 +49,7 @@ class Settings:
     max_quote_age_seconds: int = DEFAULT_MAX_QUOTE_AGE_SECONDS
     fee_rate: Decimal = DEFAULT_FEE_RATE
     cycle_interval_seconds: int = DEFAULT_CYCLE_INTERVAL_SECONDS
+    market_history_csv: str | None = None
 
 
 def _read_int(
@@ -191,6 +192,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     )
     if cycle_interval_seconds % SECONDS_PER_HOUR:
         raise ValueError("BOT_CYCLE_INTERVAL_SECONDS must be a multiple of one hour.")
+    market_history_csv = source.get("MARKET_HISTORY_CSV", "").strip() or None
 
     if max_asset_weight > max_total_exposure:
         raise ValueError("RISK_MAX_ASSET_WEIGHT cannot exceed RISK_MAX_TOTAL_EXPOSURE.")
@@ -214,6 +216,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         max_quote_age_seconds=max_quote_age_seconds,
         fee_rate=fee_rate,
         cycle_interval_seconds=cycle_interval_seconds,
+        market_history_csv=market_history_csv,
     )
 
 

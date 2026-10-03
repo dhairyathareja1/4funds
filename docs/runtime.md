@@ -23,6 +23,12 @@ the decision and excluded from that pair's strategy input. API reads retry at
 most twice after the initial request, using a bounded exponential delay. Order
 submissions are never retried automatically.
 
+Set `MARKET_HISTORY_CSV` to a historical candle CSV path to backfill missing
+hourly candles before strategy evaluation. The runtime only reads this file
+when a pair's stored history is insufficient for the configured strategy
+window. Existing pair/hour candles are left unchanged, so repeating startup is
+safe. If the variable is unset, missing history is handled as before.
+
 Live mode reconciles orders with known IDs before planning new submissions. An
 order that remains pending or has an unknown outcome blocks the cycle from
 submitting any new orders. Orders without an exchange ID remain blocked until
