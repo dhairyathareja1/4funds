@@ -19,6 +19,7 @@ DEFAULT_MAX_TOTAL_EXPOSURE = Decimal("0.75")
 DEFAULT_MINIMUM_CASH_RESERVE = Decimal("0.10")
 DEFAULT_MAX_DAILY_LOSS_FRACTION = Decimal("0.03")
 DEFAULT_MAX_DRAWDOWN_FRACTION = Decimal("0.10")
+DEFAULT_DRAWDOWN_COOLDOWN_HOURS = 24
 DEFAULT_MAX_QUOTE_AGE_SECONDS = 120
 DEFAULT_FEE_RATE = Decimal("0.001")
 DEFAULT_CYCLE_INTERVAL_SECONDS = 60 * 60
@@ -46,6 +47,7 @@ class Settings:
     minimum_cash_reserve: Decimal = DEFAULT_MINIMUM_CASH_RESERVE
     max_daily_loss_fraction: Decimal = DEFAULT_MAX_DAILY_LOSS_FRACTION
     max_drawdown_fraction: Decimal = DEFAULT_MAX_DRAWDOWN_FRACTION
+    drawdown_cooldown_hours: int = DEFAULT_DRAWDOWN_COOLDOWN_HOURS
     max_quote_age_seconds: int = DEFAULT_MAX_QUOTE_AGE_SECONDS
     fee_rate: Decimal = DEFAULT_FEE_RATE
     cycle_interval_seconds: int = DEFAULT_CYCLE_INTERVAL_SECONDS
@@ -180,6 +182,11 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         DEFAULT_MAX_DRAWDOWN_FRACTION,
         allow_zero=False,
     )
+    drawdown_cooldown_hours = _read_int(
+        source,
+        "RISK_DRAWDOWN_COOLDOWN_HOURS",
+        DEFAULT_DRAWDOWN_COOLDOWN_HOURS,
+    )
     max_quote_age_seconds = _read_int(
         source, "RISK_MAX_QUOTE_AGE_SECONDS", DEFAULT_MAX_QUOTE_AGE_SECONDS
     )
@@ -213,6 +220,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         minimum_cash_reserve=minimum_cash_reserve,
         max_daily_loss_fraction=max_daily_loss_fraction,
         max_drawdown_fraction=max_drawdown_fraction,
+        drawdown_cooldown_hours=drawdown_cooldown_hours,
         max_quote_age_seconds=max_quote_age_seconds,
         fee_rate=fee_rate,
         cycle_interval_seconds=cycle_interval_seconds,

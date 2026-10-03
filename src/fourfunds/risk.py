@@ -268,6 +268,12 @@ def _settings_error(settings: Settings) -> str | None:
         or settings.max_quote_age_seconds <= 0
     ):
         return "Maximum quote age must be a positive integer."
+    if (
+        not isinstance(settings.drawdown_cooldown_hours, int)
+        or isinstance(settings.drawdown_cooldown_hours, bool)
+        or settings.drawdown_cooldown_hours <= 0
+    ):
+        return "RISK_DRAWDOWN_COOLDOWN_HOURS must be a positive integer."
     return None
 
 
@@ -445,7 +451,6 @@ def _check_risk_state(
     if (
         not _is_positive_decimal(state.day_start_value)
         or not _is_positive_decimal(state.high_water_mark)
-        or state.high_water_mark < state.day_start_value
     ):
         return "Daily-start value or high-water mark is invalid.", None
 
@@ -457,9 +462,11 @@ def _check_risk_state(
             f"daily loss {daily_loss} reached limit "
             f"{settings.max_daily_loss_fraction}"
         )
-    if drawdown >= settings.max_drawdown_fraction:
+    if drawdown >= settings.max_drawdown_fraction or state.drawdown_breaker_active:
         triggers.append(
             f"drawdown {drawdown} reached limit {settings.max_drawdown_fraction}"
+            if drawdown >= settings.max_drawdown_fraction
+            else "drawdown breaker is awaiting cash cooldown recovery"
         )
     if not triggers:
         return None, None

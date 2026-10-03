@@ -248,8 +248,8 @@ class BotRunner:
             currency, portfolio_value = value_portfolio(
                 targets, wallet, quotes, rules, self._settings
             )
-            risk_state = self._advance_risk_state(
-                currency, portfolio_value, wallet.server_time_ms
+            risk_state, risk_transitions = self._advance_risk_state(
+                currency, portfolio_value, wallet
             )
             plan = self._planner.plan(
                 targets, wallet, quotes, rules, self._settings, risk_state
@@ -257,6 +257,7 @@ class BotRunner:
             decision["risk"] = {
                 "state": risk_state,
                 "plan": plan,
+                "transitions": risk_transitions,
             }
             self._checkpoint(cycle_id, decision)
 
@@ -367,12 +368,22 @@ class BotRunner:
         return candles, histories, errors, tuple(stale_pairs)
 
     def _advance_risk_state(
-        self, currency: str, current_value: Decimal, wallet_time_ms: int
-    ) -> PortfolioRiskState:
+        self, currency: str, current_value: Decimal, wallet: WalletSnapshot
+    ) -> tuple[PortfolioRiskState, tuple[dict[str, object], ...]]:
+        wallet_time_ms = wallet.server_time_ms
         if wallet_time_ms <= 0 or current_value <= 0:
             raise ValueError("Wallet time and portfolio value must be positive.")
+        if (
+            not isinstance(self._settings.drawdown_cooldown_hours, int)
+            or isinstance(self._settings.drawdown_cooldown_hours, bool)
+            or self._settings.drawdown_cooldown_hours <= 0
+        ):
+            raise ValueError(
+                "RISK_DRAWDOWN_COOLDOWN_HOURS must be a positive integer."
+            )
         utc_day_start_ms = wallet_time_ms // MILLISECONDS_PER_DAY * MILLISECONDS_PER_DAY
         previous = self._risk_state_store.load()
+        transitions: list[dict[str, object]] = []
         if previous is None or previous.currency != currency:
             state = PortfolioRiskState(
                 currency=currency,
@@ -386,14 +397,74 @@ class BotRunner:
                 if previous.utc_day_start_ms == utc_day_start_ms
                 else current_value
             )
+            high_water_mark = max(previous.high_water_mark, current_value)
+            daily_loss = (day_start_value - current_value) / day_start_value
+            drawdown = (high_water_mark - current_value) / high_water_mark
+            daily_loss_active = daily_loss >= self._settings.max_daily_loss_fraction
+            drawdown_triggered = drawdown >= self._settings.max_drawdown_fraction
+            drawdown_active = previous.drawdown_breaker_active or drawdown_triggered
+            cooldown_started_ms = previous.cash_cooldown_started_ms
+            remains_in_cash = all(
+                asset.asset == currency or asset.free + asset.locked == 0
+                for asset in wallet.assets
+            )
+
+            if drawdown_triggered and not previous.drawdown_breaker_active:
+                transitions.append({"event": "breaker_trip", "cause": "drawdown"})
+            if daily_loss_active and not previous.daily_loss_breaker_active:
+                transitions.append({"event": "breaker_trip", "cause": "daily_loss"})
+            if not daily_loss_active and previous.daily_loss_breaker_active:
+                transitions.append({"event": "daily_loss_recovery"})
+
+            if drawdown_active and remains_in_cash and cooldown_started_ms is None:
+                cooldown_started_ms = wallet_time_ms
+                transitions.append({"event": "cooldown_start"})
+            elif not remains_in_cash:
+                cooldown_started_ms = None
+
+            if (
+                drawdown_active
+                and remains_in_cash
+                and cooldown_started_ms is not None
+                and wallet_time_ms - cooldown_started_ms
+                >= self._settings.drawdown_cooldown_hours * 60 * 60 * 1000
+            ):
+                high_water_mark = current_value
+                drawdown_active = False
+                cooldown_started_ms = None
+                transitions.extend(
+                    (
+                        {"event": "cooldown_completion"},
+                        {"event": "drawdown_recovery"},
+                    )
+                )
+
+            previously_blocked = (
+                previous.drawdown_breaker_active or previous.daily_loss_breaker_active
+            )
+            currently_blocked = drawdown_active or daily_loss_active
+            if previously_blocked and not currently_blocked:
+                transitions.append({"event": "buying_enabled_again"})
+
             state = PortfolioRiskState(
                 currency=currency,
                 utc_day_start_ms=utc_day_start_ms,
                 day_start_value=day_start_value,
-                high_water_mark=max(previous.high_water_mark, current_value),
+                high_water_mark=high_water_mark,
+                drawdown_breaker_active=drawdown_active,
+                daily_loss_breaker_active=daily_loss_active,
+                cash_cooldown_started_ms=cooldown_started_ms,
+            )
+        for transition in transitions:
+            transition["at_ms"] = wallet_time_ms
+            logger.warning(
+                "risk transition=%s cycle_time_ms=%d details=%s",
+                transition["event"],
+                wallet_time_ms,
+                {key: value for key, value in transition.items() if key != "event"},
             )
         self._risk_state_store.save(state)
-        return state
+        return state, tuple(transitions)
 
     def _finish(
         self, cycle_id: str, decision: dict[str, object], status: str

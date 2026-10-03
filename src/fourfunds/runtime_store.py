@@ -143,6 +143,13 @@ class SQLiteRiskStateStore:
             utc_day_start_ms=int(row["utc_day_start_ms"]),
             day_start_value=Decimal(row["day_start_value"]),
             high_water_mark=Decimal(row["high_water_mark"]),
+            drawdown_breaker_active=bool(row["drawdown_breaker_active"]),
+            daily_loss_breaker_active=bool(row["daily_loss_breaker_active"]),
+            cash_cooldown_started_ms=(
+                int(row["cash_cooldown_started_ms"])
+                if row["cash_cooldown_started_ms"] is not None
+                else None
+            ),
         )
 
     def save(self, state: PortfolioRiskState) -> None:
@@ -151,19 +158,26 @@ class SQLiteRiskStateStore:
                 """
                 INSERT INTO portfolio_risk_state (
                     state_id, currency, utc_day_start_ms, day_start_value,
-                    high_water_mark
-                ) VALUES (1, ?, ?, ?, ?)
+                    high_water_mark, drawdown_breaker_active,
+                    daily_loss_breaker_active, cash_cooldown_started_ms
+                ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(state_id) DO UPDATE SET
                     currency = excluded.currency,
                     utc_day_start_ms = excluded.utc_day_start_ms,
                     day_start_value = excluded.day_start_value,
-                    high_water_mark = excluded.high_water_mark
+                    high_water_mark = excluded.high_water_mark,
+                    drawdown_breaker_active = excluded.drawdown_breaker_active,
+                    daily_loss_breaker_active = excluded.daily_loss_breaker_active,
+                    cash_cooldown_started_ms = excluded.cash_cooldown_started_ms
                 """,
                 (
                     state.currency,
                     state.utc_day_start_ms,
                     str(state.day_start_value),
                     str(state.high_water_mark),
+                    int(state.drawdown_breaker_active),
+                    int(state.daily_loss_breaker_active),
+                    state.cash_cooldown_started_ms,
                 ),
             )
 
@@ -176,10 +190,33 @@ class SQLiteRiskStateStore:
                     currency TEXT NOT NULL,
                     utc_day_start_ms INTEGER NOT NULL,
                     day_start_value TEXT NOT NULL,
-                    high_water_mark TEXT NOT NULL
+                    high_water_mark TEXT NOT NULL,
+                    drawdown_breaker_active INTEGER NOT NULL DEFAULT 0,
+                    daily_loss_breaker_active INTEGER NOT NULL DEFAULT 0,
+                    cash_cooldown_started_ms INTEGER
                 )
                 """
             )
+            existing_columns = {
+                row["name"]
+                for row in connection.execute(
+                    "PRAGMA table_info(portfolio_risk_state)"
+                )
+            }
+            migrations = {
+                "drawdown_breaker_active": (
+                    "INTEGER NOT NULL DEFAULT 0"
+                ),
+                "daily_loss_breaker_active": (
+                    "INTEGER NOT NULL DEFAULT 0"
+                ),
+                "cash_cooldown_started_ms": "INTEGER",
+            }
+            for name, definition in migrations.items():
+                if name not in existing_columns:
+                    connection.execute(
+                        f"ALTER TABLE portfolio_risk_state ADD COLUMN {name} {definition}"
+                    )
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self._database_path)
