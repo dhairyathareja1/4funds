@@ -621,13 +621,13 @@ def _plan_sell(
                 "Locked balance prevents selling the full target reduction.",
             )
         )
-    limit_price = _rounded_price(
-        market.quote.bid, market.rule.price_precision, ROUND_UP
+    estimated_price = _rounded_price(
+        market.quote.bid, market.rule.price_precision, ROUND_DOWN
     )
     quantity = _rounded_quantity(available_quantity, market.rule.amount_precision)
-    if limit_price is None or limit_price <= ZERO:
+    if estimated_price is None or estimated_price <= ZERO:
         rejections.append(
-            OrderRejection(pair, "Sell limit price rounds to zero or is invalid.")
+            OrderRejection(pair, "Sell reference price rounds to zero or is invalid.")
         )
         return None, rejections
     if quantity is None or quantity <= ZERO:
@@ -642,7 +642,7 @@ def _plan_sell(
                 "Sell quantity was rounded down to exchange amount precision.",
             )
         )
-    notional = quantity * limit_price
+    notional = quantity * estimated_price
     if notional < market.rule.minimum_order_value:
         rejections.append(
             OrderRejection(
@@ -658,12 +658,12 @@ def _plan_sell(
             pair=pair,
             side=OrderSide.SELL,
             quantity=quantity,
-            order_type=OrderType.LIMIT,
-            limit_price=limit_price,
+            order_type=OrderType.MARKET,
             reason=_append_notes(
-                f"Reduce holdings to the target. Estimated fee allowance: {fee}.",
+                f"Reduce holdings to the target. Estimated taker fee: {fee}.",
                 (target_reason,),
             ),
+            reference_price=estimated_price,
         ),
         rejections,
     )
@@ -681,11 +681,16 @@ def _plan_buy(
 ) -> tuple[OrderIntent | None, list[OrderRejection], Decimal, Decimal]:
     pair = market.rule.pair
     rejections: list[OrderRejection] = []
-    limit_price = _rounded_price(
-        market.quote.ask, market.rule.price_precision, ROUND_DOWN
+    estimated_price = _rounded_price(
+        market.quote.ask, market.rule.price_precision, ROUND_UP
     )
-    if limit_price is None or limit_price <= ZERO:
-        return None, [OrderRejection(pair, "Buy limit price is invalid.")], ZERO, ZERO
+    if estimated_price is None or estimated_price <= ZERO:
+        return (
+            None,
+            [OrderRejection(pair, "Buy reference price is invalid.")],
+            ZERO,
+            ZERO,
+        )
 
     current_asset_value = portfolio.asset_values.get(base, ZERO)
     remaining_asset_capacity = max(
@@ -694,9 +699,9 @@ def _plan_buy(
     )
     remaining_total_capacity = max(ZERO, total_exposure_budget)
     cash_capacity_quantity = spendable_cash / (
-        limit_price * (ONE + settings.fee_rate)
+        estimated_price * (ONE + settings.fee_rate)
     )
-    exposure_price = max(limit_price, market.quote.last)
+    exposure_price = max(estimated_price, market.quote.last)
     exposure_unit_cost = exposure_price * (ONE + settings.fee_rate)
     asset_capacity_quantity = remaining_asset_capacity / exposure_unit_cost
     total_capacity_quantity = remaining_total_capacity / exposure_unit_cost
@@ -725,7 +730,7 @@ def _plan_buy(
                 "by cash, reserve, exposure, or exchange precision limits.",
             )
         )
-    notional = quantity * limit_price
+    notional = quantity * estimated_price
     if notional < market.rule.minimum_order_value:
         rejections.append(
             OrderRejection(
@@ -749,12 +754,12 @@ def _plan_buy(
             pair=pair,
             side=OrderSide.BUY,
             quantity=quantity,
-            order_type=OrderType.LIMIT,
-            limit_price=limit_price,
+            order_type=OrderType.MARKET,
             reason=_append_notes(
-                f"Move toward the target weight. Estimated fee allowance: {fee}.",
+                f"Move toward the target weight. Estimated taker fee: {fee}.",
                 (target_reason,),
             ),
+            reference_price=estimated_price,
         ),
         rejections,
         total_spend,

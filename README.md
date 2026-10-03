@@ -2,11 +2,15 @@
 
 4Funds is a modular trading-bot project for the Roostoo APAC University Quant Trading Hackathon.
 
-The repository implements validated settings, the Roostoo API client, market-history storage, and the v0 baseline strategy. Order execution and backtesting are not implemented yet. The CLI makes no network requests and places no orders.
+The repository implements validated settings, the Roostoo API client,
+market-history storage, the v0 baseline strategy, risk-checked order planning,
+and order execution. Historical backtesting and complete live-cycle
+orchestration are not implemented. The CLI makes no network requests and
+places no orders.
 
 ## v0 strategy
 
-The baseline is a deterministic, long-only hourly trend strategy. A pair must be tradable, meet the configured 24-hour quote-turnover minimum, and have enough contiguous hourly candles. Its current quote must have positive momentum over the configured lookback and sit above the simple average of the configured number of latest hourly closes. Qualifying pairs are ranked by momentum, with pair name breaking ties, and the top `top_k` receive equal target weights. If no pair qualifies, the strategy returns a full-cash target (`pair=None`) with a reason. Each asset target records its momentum, trend check, and rank. Risk controls will cap exposure; backtest results will be documented separately.
+The baseline is a deterministic, long-only hourly trend strategy. A pair must be tradable, meet the configured 24-hour quote-turnover minimum, and have enough contiguous hourly candles. Its current quote must have positive momentum over the configured lookback and sit above the simple average of the configured number of latest hourly closes. Qualifying pairs are ranked by momentum, with pair name breaking ties, and the top `top_k` receive equal target weights. If no pair qualifies, the strategy returns a full-cash target (`pair=None`) with a reason. Each asset target records its momentum, trend check, and rank. Risk controls cap exposure; backtest results will be documented separately.
 
 ## Project layout
 
@@ -16,7 +20,8 @@ The baseline is a deterministic, long-only hourly trend strategy. A pair must be
 - src/fourfunds/data.py — market-history storage interface
 - src/fourfunds/strategy.py — baseline target-weight interface
 - src/fourfunds/risk.py — portfolio valuation and risk-checked order planning
-- src/fourfunds/execution.py — order submission and reconciliation interface
+- src/fourfunds/execution.py — market-order submission and reconciliation
+- src/fourfunds/execution_store.py — durable execution journal
 - src/fourfunds/runtime.py — bot-cycle orchestration interface
 - src/fourfunds/backtest.py — historical replay interface
 
@@ -32,7 +37,7 @@ Requires Python 3.10 or newer.
     Copy-Item .env.example .env
     python -m fourfunds
 
-The CLI only reports the selected mode and states that trading is not implemented. Do not put real credentials in .env.example or commit .env. The resource-pack PDF is intentionally ignored by Git because it contains credentials.
+The CLI reports the selected mode and does not start a trading cycle. Do not put real credentials in .env.example or commit .env. The resource-pack PDF is intentionally ignored by Git because it contains credentials.
 
 ## Configuration
 
@@ -58,9 +63,13 @@ The risk planner's inputs, output, portfolio valuation, and circuit-breaker
 behavior are described in [Risk planning](docs/risk-planning.md). It proposes
 orders only and does not submit them.
 
+The executor's modes, order-state journal, fee estimates, and timeout handling
+are described in [Order execution](docs/execution.md). Live submission is
+available through the executor when explicitly called; the CLI does not invoke
+it.
+
 ## Safety
 
 - The default mode is dry_run.
-- live mode is rejected until API integration and order execution are implemented.
-- No manual or automated orders are sent by this scaffold.
+- The CLI does not start a live trading cycle.
 - Use rotated credentials from the environment; never paste keys into source, issues, logs, or README files.
