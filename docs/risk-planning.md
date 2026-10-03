@@ -19,6 +19,11 @@ configured limit is reached, buys are disabled and the planner targets cash,
 proposing sells for available balances. Missing, invalid, stale-day, or
 mismatched risk state produces no orders.
 
+The runtime initializes risk state from the first valid portfolio valuation and
+persists it across restarts. At UTC midnight it resets the daily-start value and
+continues tracking the high-water mark. A change in portfolio numeraire starts a
+new risk-state series.
+
 Per-asset targets are capped by `RISK_MAX_ASSET_WEIGHT`. Total target exposure
 is capped by the smaller of `RISK_MAX_TOTAL_EXPOSURE` and one minus
 `RISK_MINIMUM_CASH_RESERVE`. The planner sizes buys against current exposure,

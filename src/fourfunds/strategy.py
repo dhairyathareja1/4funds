@@ -1,5 +1,7 @@
 # Deterministic hourly trend strategy.
 
+from __future__ import annotations
+
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_DOWN, localcontext
@@ -15,6 +17,15 @@ PERCENT_SCALE = Decimal("100")
 
 
 class Strategy(Protocol):
+    def decide(
+        self,
+        quotes: Mapping[str, MarketQuote],
+        candles: Mapping[str, Sequence[Candle]],
+        rules: Mapping[str, ExchangeRule],
+        settings: Settings,
+    ) -> StrategyDecision:
+        ...
+
     def propose_targets(
         self,
         quotes: Mapping[str, MarketQuote],
@@ -25,6 +36,23 @@ class Strategy(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class StrategySignal:
+    pair: str
+    qualifies: bool
+    momentum: Decimal | None
+    current_price: Decimal | None
+    trend_average: Decimal | None
+    rank: int | None
+    reason: str
+
+
+@dataclass(frozen=True)
+class StrategyDecision:
+    signals: tuple[StrategySignal, ...]
+    targets: tuple[TargetWeight, ...]
+
+
 class BaselineStrategy:
     def propose_targets(
         self,
@@ -33,6 +61,15 @@ class BaselineStrategy:
         rules: Mapping[str, ExchangeRule],
         settings: Settings,
     ) -> Sequence[TargetWeight]:
+        return self.decide(quotes, candles, rules, settings).targets
+
+    def decide(
+        self,
+        quotes: Mapping[str, MarketQuote],
+        candles: Mapping[str, Sequence[Candle]],
+        rules: Mapping[str, ExchangeRule],
+        settings: Settings,
+    ) -> StrategyDecision:
         _validate_settings(settings)
         pairs = sorted(set(quotes) | set(candles) | set(rules))
         signals: list[_Signal] = []
@@ -46,11 +83,25 @@ class BaselineStrategy:
                 signals.append(result)
 
         if not signals:
-            return (
-                TargetWeight(
-                    pair=None,
-                    weight=ONE,
-                    reason=_cash_reason(rejections),
+            return StrategyDecision(
+                signals=tuple(
+                    StrategySignal(
+                        pair=pair,
+                        qualifies=False,
+                        momentum=None,
+                        current_price=None,
+                        trend_average=None,
+                        rank=None,
+                        reason=reason,
+                    )
+                    for pair, reason in sorted(rejections.items())
+                ),
+                targets=(
+                    TargetWeight(
+                        pair=None,
+                        weight=ONE,
+                        reason=_cash_reason(rejections),
+                    ),
                 ),
             )
 
@@ -61,7 +112,7 @@ class BaselineStrategy:
         with localcontext() as context:
             context.rounding = ROUND_DOWN
             weight = ONE / Decimal(len(selected))
-        return tuple(
+        targets = tuple(
             TargetWeight(
                 pair=signal.pair,
                 weight=weight,
@@ -71,6 +122,33 @@ class BaselineStrategy:
             )
             for rank, signal in enumerate(selected, start=1)
         )
+        decision_signals = tuple(
+            StrategySignal(
+                pair=signal.pair,
+                qualifies=True,
+                momentum=signal.momentum,
+                current_price=signal.current_price,
+                trend_average=signal.trend_average,
+                rank=rank,
+                reason=_target_reason(
+                    signal, rank, len(ranked_signals), settings
+                ),
+            )
+            for rank, signal in enumerate(ranked_signals, start=1)
+        )
+        decision_signals += tuple(
+            StrategySignal(
+                pair=pair,
+                qualifies=False,
+                momentum=None,
+                current_price=None,
+                trend_average=None,
+                rank=None,
+                reason=reason,
+            )
+            for pair, reason in sorted(rejections.items())
+        )
+        return StrategyDecision(signals=decision_signals, targets=targets)
 
 
 @dataclass(frozen=True)

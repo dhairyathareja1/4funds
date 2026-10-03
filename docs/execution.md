@@ -27,5 +27,6 @@ provided the exchange reports no pending orders for the pair.
 
 Results use `FILLED`, `REJECTED`, `PENDING`, `CANCELED`, `UNKNOWN`, or `DRY_RUN`
 statuses. `UNKNOWN` and `PENDING` records prevent another order for that pair.
-`OrderExecutor` can submit live orders when explicitly called, but the CLI does
-not start an execution cycle.
+The CLI invokes the executor as part of each cycle. `read_only` skips order
+execution, `dry_run` records intents, and `live` can submit orders after startup
+validation and reconciliation.

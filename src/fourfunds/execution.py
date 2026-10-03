@@ -1,7 +1,7 @@
 import logging
 import time
 from collections.abc import Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import Protocol
 
@@ -49,7 +49,16 @@ class ExecutionClient(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class ReconciliationReport:
+    checked: tuple[ExecutionRecord, ...]
+    unresolved: tuple[ExecutionRecord, ...]
+
+
 class Executor(Protocol):
+    def reconcile_pending(self) -> ReconciliationReport:
+        ...
+
     def execute(
         self, intents: Sequence[OrderIntent], *, mode: RunMode
     ) -> Sequence[ExecutionResult]:
@@ -72,6 +81,9 @@ class ExecutionJournal(Protocol):
         ...
 
     def resolve_unknown(self, pair: str, result: ExecutionResult) -> None:
+        ...
+
+    def unresolved(self) -> tuple[ExecutionRecord, ...]:
         ...
 
 
@@ -151,6 +163,70 @@ class OrderExecutor:
             pending_order_count=pending.total_pending,
         )
         self._journal.resolve_unknown(reconciled.pair, reconciled)
+
+    def reconcile_pending(self) -> ReconciliationReport:
+        checked: list[ExecutionRecord] = []
+        for record in self._journal.unresolved():
+            try:
+                pending = self._client.get_pending_count()
+            except RoostooAPIError:
+                continue
+            pair_pending = _pair_pending_count(pending, record.intent.pair)
+            if pair_pending is None:
+                continue
+
+            if not record.result.order_id:
+                if record.result.status == "PENDING" and pair_pending == 0:
+                    result = replace(
+                        record.result,
+                        status="UNKNOWN",
+                        message=(
+                            "Pending order disappeared without an order ID; "
+                            "manual reconciliation is required."
+                        ),
+                        pending_order_count=pending.total_pending,
+                    )
+                    self._journal.finish(record.record_id, result)
+                    checked.append(replace(record, result=result))
+                continue
+
+            try:
+                queried = self._client.query_order(record.result.order_id)
+            except RoostooAPIError:
+                continue
+            resolved = _normalize_result(
+                queried, record.intent, self._taker_fee_rate
+            )
+            if resolved.status == "PENDING" and pair_pending == 0:
+                resolved = replace(
+                    resolved,
+                    status="UNKNOWN",
+                    message=_append_message(
+                        resolved.message,
+                        "Exchange reports no pending order; manual "
+                        "reconciliation is required.",
+                    ),
+                )
+            try:
+                wallet = self._client.get_balance()
+            except RoostooAPIError as exc:
+                resolved = replace(
+                    resolved,
+                    message=_append_message(
+                        resolved.message, f"Wallet refresh failed: {exc}"
+                    ),
+                )
+            else:
+                resolved = replace(resolved, wallet_snapshot=wallet)
+            resolved = replace(
+                resolved, pending_order_count=pending.total_pending
+            )
+            self._journal.finish(record.record_id, resolved)
+            checked.append(replace(record, result=resolved))
+        return ReconciliationReport(
+            checked=tuple(checked),
+            unresolved=self._journal.unresolved(),
+        )
 
     def _dry_run_result(self, intent: OrderIntent) -> ExecutionResult:
         price = intent.reference_price or intent.limit_price

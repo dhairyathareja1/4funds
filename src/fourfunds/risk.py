@@ -221,6 +221,29 @@ def plan_orders(
     )
 
 
+def value_portfolio(
+    targets: Sequence[TargetWeight],
+    wallet: WalletSnapshot,
+    tickers: Mapping[str, MarketQuote],
+    exchange_rules: Mapping[str, ExchangeRule],
+    settings: Settings,
+) -> tuple[str, Decimal]:
+    settings_error = _settings_error(settings)
+    if settings_error is not None:
+        raise ValueError(settings_error)
+    if not targets:
+        raise ValueError("No target weights were supplied; portfolio was not valued.")
+
+    portfolio, portfolio_error = _build_portfolio(
+        targets, wallet, tickers, exchange_rules, settings
+    )
+    if portfolio_error is not None:
+        raise ValueError(portfolio_error)
+    if portfolio is None:
+        raise ValueError("Portfolio valuation failed.")
+    return portfolio.currency, portfolio.value
+
+
 def _settings_error(settings: Settings) -> str | None:
     fractions = (
         ("RISK_MAX_ASSET_WEIGHT", settings.max_asset_weight, False),
