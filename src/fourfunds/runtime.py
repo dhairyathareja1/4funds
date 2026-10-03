@@ -221,19 +221,13 @@ class BotRunner:
                 ]
                 return self._finish(cycle_id, decision, "refused")
 
-            candles, histories, history_errors, stale_pairs = self._load_history(
+            candles, histories, history_errors, history_repairs = self._load_history(
                 quotes, quote_time_ms
             )
             decision["inputs"]["market_history"] = histories
             decision["inputs"]["history_errors"] = history_errors
+            decision["inputs"]["history_repairs"] = history_repairs
             self._checkpoint(cycle_id, decision)
-            if stale_pairs:
-                decision["errors"] = [
-                    "Historical market data is stale for: "
-                    + ", ".join(stale_pairs)
-                    + "."
-                ]
-                return self._finish(cycle_id, decision, "refused")
             strategy_decision = self._strategy.decide(
                 quotes, candles, rules, self._settings
             )
@@ -302,7 +296,7 @@ class BotRunner:
         dict[str, tuple[Candle, ...]],
         dict[str, object],
         dict[str, str],
-        tuple[str, ...],
+        dict[str, dict[str, object]],
     ]:
         window_hours = max(
             self._settings.momentum_lookback_hours + 1,
@@ -311,8 +305,8 @@ class BotRunner:
         candles: dict[str, tuple[Candle, ...]] = {}
         histories: dict[str, object] = {}
         errors: dict[str, str] = {}
-        stale_pairs: list[str] = []
-        insufficient_pairs: list[str] = []
+        repair_candidates: list[str] = []
+        repairs: dict[str, dict[str, object]] = {}
         for pair in sorted(quotes):
             try:
                 history = self._market_data.get_market_history(
@@ -323,48 +317,70 @@ class BotRunner:
                 )
             except StaleMarketDataError as exc:
                 errors[pair] = str(exc)
-                stale_pairs.append(pair)
-                continue
+                repair_candidates.append(pair)
             except MarketDataError as exc:
                 errors[pair] = str(exc)
                 if isinstance(exc, InsufficientMarketHistoryError):
-                    insufficient_pairs.append(pair)
+                    repair_candidates.append(pair)
+                else:
+                    repairs[pair] = {
+                        "repair_attempted": False,
+                        "repair_succeeded": None,
+                        "repair_error": None,
+                    }
                 continue
-            candles[pair] = history.candles
-            histories[pair] = history
+            else:
+                candles[pair] = history.candles
+                histories[pair] = history
 
         history_source = self._settings.market_history_csv
-        if insufficient_pairs and history_source:
+        for pair in repair_candidates:
+            repairs[pair] = {
+                "repair_attempted": False,
+                "repair_succeeded": None,
+                "repair_error": None,
+            }
+
+        if repair_candidates and history_source:
+            for pair in repair_candidates:
+                repairs[pair]["repair_attempted"] = True
             window_end_ms = end_time_ms // HOUR_MS * HOUR_MS
             window_start_ms = window_end_ms - window_hours * HOUR_MS
-            source_candles = load_historical_candles(history_source)
-            for pair in insufficient_pairs:
-                missing_window = tuple(
-                    candle
-                    for candle in source_candles
-                    if candle.pair == pair
-                    and window_start_ms <= candle.open_time_ms < window_end_ms
-                )
-                self._market_data.record_candles_if_missing(missing_window)
+            try:
+                source_candles = load_historical_candles(history_source)
+            except Exception as exc:
+                for pair in repair_candidates:
+                    repairs[pair]["repair_succeeded"] = False
+                    repairs[pair]["repair_error"] = _safe_message(
+                        exc, self._settings
+                    )
+                return candles, histories, errors, repairs
 
-            for pair in insufficient_pairs:
+            for pair in repair_candidates:
                 try:
+                    missing_window = tuple(
+                        candle
+                        for candle in source_candles
+                        if candle.pair == pair
+                        and window_start_ms <= candle.open_time_ms < window_end_ms
+                    )
+                    self._market_data.record_candles_if_missing(missing_window)
                     history = self._market_data.get_market_history(
                         pair,
                         end_time_ms=end_time_ms,
                         window_hours=window_hours,
                         max_age_ms=DEFAULT_MAX_DATA_AGE_MS,
                     )
-                except StaleMarketDataError as exc:
-                    errors[pair] = str(exc)
-                    stale_pairs.append(pair)
-                except MarketDataError as exc:
-                    errors[pair] = str(exc)
+                except Exception as exc:
+                    repairs[pair]["repair_succeeded"] = False
+                    repairs[pair]["repair_error"] = _safe_message(
+                        exc, self._settings
+                    )
                 else:
-                    errors.pop(pair, None)
+                    repairs[pair]["repair_succeeded"] = True
                     candles[pair] = history.candles
                     histories[pair] = history
-        return candles, histories, errors, tuple(stale_pairs)
+        return candles, histories, errors, repairs
 
     def _advance_risk_state(
         self, currency: str, current_value: Decimal, wallet_time_ms: int
