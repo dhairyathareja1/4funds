@@ -109,6 +109,7 @@ class OrderIntent:
     order_type: OrderType = OrderType.MARKET
     limit_price: Decimal | None = None
     reason: str = ""
+    reference_price: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -144,3 +145,6 @@ class ExecutionResult:
     average_fill_price: Decimal | None = None
     commission: Decimal = Decimal("0")
     message: str = ""
+    commission_estimated: bool = False
+    wallet_snapshot: WalletSnapshot | None = None
+    pending_order_count: int | None = None

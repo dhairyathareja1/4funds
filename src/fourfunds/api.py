@@ -377,6 +377,7 @@ def _parse_execution_result(
         detail.get("FilledAverPrice", 0), "FilledAverPrice", endpoint
     )
     order_id = detail.get("OrderID")
+    raw_commission = detail.get("CommissionChargeValue")
     return ExecutionResult(
         pair=_read_text(detail.get("Pair"), "Pair", endpoint),
         status=_read_text(detail.get("Status"), "Status", endpoint),
@@ -386,8 +387,11 @@ def _parse_execution_result(
         ),
         average_fill_price=average_fill_price if average_fill_price > 0 else None,
         commission=_read_decimal(
-            detail.get("CommissionChargeValue", 0), "CommissionChargeValue", endpoint
+            raw_commission if raw_commission is not None else 0,
+            "CommissionChargeValue",
+            endpoint,
         ),
+        commission_estimated=raw_commission is None,
     )
 
 

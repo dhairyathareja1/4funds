@@ -25,9 +25,9 @@ is capped by the smaller of `RISK_MAX_TOTAL_EXPOSURE` and one minus
 available quote balance, the cash reserve, and the fee allowance. It does not
 use pending sale proceeds to fund buys in the same plan.
 
-Buy limits round the current ask downward to cap the purchase price; sell
-limits round the current bid upward to protect the minimum sale price.
-Quantities round down to exchange precision. Orders below the
-exchange minimum notional, stale or invalid market data, locked sell balances,
-insufficient free cash, and cap-limited quantities are reported in
-`rejections`.
+Order intents use market orders. Their reference prices conservatively round
+the current ask up for buys and the current bid down for sells; these prices
+support sizing and fee estimates but do not guarantee execution prices.
+Quantities round down to exchange precision. Orders below the exchange minimum
+notional, stale or invalid market data, locked sell balances, insufficient
+free cash, and cap-limited quantities are reported in `rejections`.
