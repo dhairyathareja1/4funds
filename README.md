@@ -15,7 +15,7 @@ The baseline is a deterministic, long-only hourly trend strategy. A pair must be
 - src/fourfunds/api.py — Roostoo HTTP client interface
 - src/fourfunds/data.py — market-history storage interface
 - src/fourfunds/strategy.py — baseline target-weight interface
-- src/fourfunds/risk.py — portfolio valuation and order-planning interface
+- src/fourfunds/risk.py — portfolio valuation and risk-checked order planning
 - src/fourfunds/execution.py — order submission and reconciliation interface
 - src/fourfunds/runtime.py — bot-cycle orchestration interface
 - src/fourfunds/backtest.py — historical replay interface
@@ -53,6 +53,10 @@ Copy `.env.example` to `.env` to configure the bot. Strategy and risk values are
 | `RISK_FEE_RATE` | `0.001` | Fee allowance per trade |
 
 Weights, loss limits, and the fee rate are decimal fractions: `0.25` means 25%. `BOT_MODE` defaults to `dry_run`. `live` requires API credentials and an explicitly configured HTTPS `ROOSTOO_BASE_URL`; secrets are excluded from settings representations and startup output.
+
+The risk planner's inputs, output, portfolio valuation, and circuit-breaker
+behavior are described in [Risk planning](docs/risk-planning.md). It proposes
+orders only and does not submit them.
 
 ## Safety
 
