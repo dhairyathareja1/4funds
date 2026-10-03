@@ -19,6 +19,14 @@ configured limit is reached, buys are disabled and the planner targets cash,
 proposing sells for available balances. Missing, invalid, stale-day, or
 mismatched risk state produces no orders.
 
+When the drawdown breaker is active and the portfolio contains no non-cash
+balances, the runtime starts a cash cooldown. `RISK_DRAWDOWN_COOLDOWN_HOURS`
+sets its duration (default: 24 hours; it must be a positive integer). The
+drawdown high-water mark is reset to the current portfolio value only after the
+portfolio has remained in cash for the full cooldown. Until then, the persisted
+drawdown breaker continues to prevent buys. The daily-loss guard is evaluated
+independently and can continue preventing buys after drawdown recovery.
+
 The runtime initializes risk state from the first valid portfolio valuation and
 persists it across restarts. At UTC midnight it resets the daily-start value and
 continues tracking the high-water mark. A change in portfolio numeraire starts a

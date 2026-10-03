@@ -81,6 +81,9 @@ class PortfolioRiskState:
     utc_day_start_ms: int
     day_start_value: Decimal
     high_water_mark: Decimal
+    drawdown_breaker_active: bool = False
+    daily_loss_breaker_active: bool = False
+    cash_cooldown_started_ms: int | None = None
 
 
 @dataclass(frozen=True)

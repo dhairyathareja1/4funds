@@ -29,6 +29,7 @@ class SettingsTests(unittest.TestCase):
                 "RISK_MINIMUM_CASH_RESERVE": "0.20",
                 "RISK_MAX_DAILY_LOSS_FRACTION": "0.04",
                 "RISK_MAX_DRAWDOWN_FRACTION": "0.12",
+                "RISK_DRAWDOWN_COOLDOWN_HOURS": "48",
                 "RISK_MAX_QUOTE_AGE_SECONDS": "90",
                 "RISK_FEE_RATE": "0.002",
             }
@@ -47,6 +48,7 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.minimum_cash_reserve, Decimal("0.20"))
         self.assertEqual(settings.max_daily_loss_fraction, Decimal("0.04"))
         self.assertEqual(settings.max_drawdown_fraction, Decimal("0.12"))
+        self.assertEqual(settings.drawdown_cooldown_hours, 48)
         self.assertEqual(settings.max_quote_age_seconds, 90)
         self.assertEqual(settings.fee_rate, Decimal("0.002"))
 
@@ -66,6 +68,8 @@ class SettingsTests(unittest.TestCase):
             {"STRATEGY_MINIMUM_QUOTE_TURNOVER_24H": "-1"},
             {"RISK_MAX_ASSET_WEIGHT": "1.1"},
             {"RISK_MAX_DAILY_LOSS_FRACTION": "0"},
+            {"RISK_DRAWDOWN_COOLDOWN_HOURS": "0"},
+            {"RISK_DRAWDOWN_COOLDOWN_HOURS": "1.5"},
             {"RISK_FEE_RATE": "Infinity"},
             {"RISK_MAX_QUOTE_AGE_SECONDS": "0"},
             {
