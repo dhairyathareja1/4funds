@@ -58,6 +58,9 @@ class MarketDataStore(Protocol):
     def record_candles(self, candles: Sequence[Candle]) -> None:
         ...
 
+    def record_candles_if_missing(self, candles: Sequence[Candle]) -> None:
+        ...
+
     def get_market_history(
         self,
         pair: str,
@@ -154,6 +157,37 @@ class SQLiteMarketDataStore:
             raise DuplicateCandleError(
                 "One or more candles already exist in the requested history."
             ) from None
+
+    def record_candles_if_missing(self, candles: Sequence[Candle]) -> None:
+        if not candles:
+            return
+
+        for candle in candles:
+            _validate_candle(candle)
+
+        with closing(self._connect()) as connection, connection:
+            connection.executemany(
+                """
+                INSERT OR IGNORE INTO market_candles (
+                    pair, open_time_ms, close_time_ms, open, high, low,
+                    close, volume, source
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        candle.pair,
+                        candle.open_time_ms,
+                        candle.close_time_ms,
+                        str(candle.open),
+                        str(candle.high),
+                        str(candle.low),
+                        str(candle.close),
+                        str(candle.volume),
+                        candle.source.value,
+                    )
+                    for candle in candles
+                ],
+            )
 
     def get_market_history(
         self,

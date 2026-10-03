@@ -18,10 +18,22 @@ Each cycle follows this order:
 6. Store the inputs, targets, risk decisions, orders, results, and errors.
 
 Ticker snapshots older than `RISK_MAX_QUOTE_AGE_SECONDS` are recorded but refuse
-the cycle before planning or execution. Historical data gaps are recorded with
-the decision and excluded from that pair's strategy input. API reads retry at
-most twice after the initial request, using a bounded exponential delay. Order
-submissions are never retried automatically.
+the cycle before planning or execution. Stale or gappy hourly history is handled
+per pair: when `MARKET_HISTORY_CSV` is configured, the runtime attempts to
+repair the pair's requested window; repaired history is used for strategy
+evaluation, while pairs that remain stale or incomplete are excluded. Other
+healthy pairs continue through the cycle. The decision log keeps each pair's
+original history error and whether repair was attempted and succeeded, including
+the repair error when it fails. API reads retry at most twice after the initial
+request, using a bounded exponential delay. Order submissions are never
+retried automatically.
+
+Set `MARKET_HISTORY_CSV` to a historical candle CSV path to backfill missing
+hourly candles before strategy evaluation. The runtime reads this file only
+when a pair's stored history is stale or insufficient for the configured
+strategy window. Existing pair/hour candles are left unchanged, so repeating
+startup is safe. If the variable is unset, affected pairs are excluded and
+healthy pairs continue.
 
 Live mode reconciles orders with known IDs before planning new submissions. An
 order that remains pending or has an unknown outcome blocks the cycle from
