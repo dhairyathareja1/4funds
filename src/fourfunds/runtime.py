@@ -39,6 +39,10 @@ MILLISECONDS_PER_DAY = 24 * 60 * 60 * MILLISECONDS_PER_SECOND
 _Result = TypeVar("_Result")
 
 
+def _now_ms() -> int:
+    return time.time_ns() // 1_000_000
+
+
 class RiskStateRepository(Protocol):
     def load(self) -> PortfolioRiskState | None:
         ...
@@ -452,7 +456,3 @@ def _redact(message: str, settings: Settings) -> str:
         if secret:
             message = message.replace(secret, "[REDACTED]")
     return message
-
-
-def _now_ms() -> int:
-    return time.time_ns() // 1_000_000

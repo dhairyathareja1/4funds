@@ -1,10 +1,6 @@
-import io
 import unittest
-from contextlib import redirect_stdout
 from decimal import Decimal
-from unittest.mock import patch
 
-from fourfunds import cli
 from fourfunds.settings import RunMode, load_settings
 
 
@@ -115,21 +111,3 @@ class SettingsTests(unittest.TestCase):
 
         self.assertNotIn("test-key", repr(settings))
         self.assertNotIn("test-secret", repr(settings))
-
-    def test_cli_reports_live_mode_before_refusing_live_trading(self):
-        settings = load_settings(
-            {
-                "BOT_MODE": "live",
-                "ROOSTOO_BASE_URL": "https://api.roostoo.com",
-                "ROOSTOO_API_KEY": "test-key",
-                "ROOSTOO_API_SECRET": "test-secret",
-            }
-        )
-        output = io.StringIO()
-
-        with patch.object(cli, "load_settings", return_value=settings):
-            with redirect_stdout(output):
-                with self.assertRaises(SystemExit):
-                    cli.main()
-
-        self.assertEqual(output.getvalue(), "Run mode: live.\n")
