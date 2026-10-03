@@ -21,6 +21,8 @@ DEFAULT_MAX_DAILY_LOSS_FRACTION = Decimal("0.03")
 DEFAULT_MAX_DRAWDOWN_FRACTION = Decimal("0.10")
 DEFAULT_MAX_QUOTE_AGE_SECONDS = 120
 DEFAULT_FEE_RATE = Decimal("0.001")
+DEFAULT_CYCLE_INTERVAL_SECONDS = 60 * 60
+SECONDS_PER_HOUR = 60 * 60
 
 
 class RunMode(str, Enum):
@@ -46,6 +48,7 @@ class Settings:
     max_drawdown_fraction: Decimal = DEFAULT_MAX_DRAWDOWN_FRACTION
     max_quote_age_seconds: int = DEFAULT_MAX_QUOTE_AGE_SECONDS
     fee_rate: Decimal = DEFAULT_FEE_RATE
+    cycle_interval_seconds: int = DEFAULT_CYCLE_INTERVAL_SECONDS
 
 
 def _read_int(
@@ -180,6 +183,14 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         source, "RISK_MAX_QUOTE_AGE_SECONDS", DEFAULT_MAX_QUOTE_AGE_SECONDS
     )
     fee_rate = _read_fraction(source, "RISK_FEE_RATE", DEFAULT_FEE_RATE)
+    cycle_interval_seconds = _read_int(
+        source,
+        "BOT_CYCLE_INTERVAL_SECONDS",
+        DEFAULT_CYCLE_INTERVAL_SECONDS,
+        minimum=SECONDS_PER_HOUR,
+    )
+    if cycle_interval_seconds % SECONDS_PER_HOUR:
+        raise ValueError("BOT_CYCLE_INTERVAL_SECONDS must be a multiple of one hour.")
 
     if max_asset_weight > max_total_exposure:
         raise ValueError("RISK_MAX_ASSET_WEIGHT cannot exceed RISK_MAX_TOTAL_EXPOSURE.")
@@ -202,4 +213,25 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         max_drawdown_fraction=max_drawdown_fraction,
         max_quote_age_seconds=max_quote_age_seconds,
         fee_rate=fee_rate,
+        cycle_interval_seconds=cycle_interval_seconds,
     )
+
+
+def validate_runtime_settings(settings: Settings) -> None:
+    if not isinstance(settings.mode, RunMode):
+        raise ValueError("BOT_MODE must be a valid RunMode value.")
+    if (
+        not isinstance(settings.cycle_interval_seconds, int)
+        or isinstance(settings.cycle_interval_seconds, bool)
+        or settings.cycle_interval_seconds < SECONDS_PER_HOUR
+        or settings.cycle_interval_seconds % SECONDS_PER_HOUR
+    ):
+        raise ValueError("BOT_CYCLE_INTERVAL_SECONDS must be a multiple of one hour.")
+    if not (settings.api_key and settings.api_key.strip()):
+        raise ValueError("Bot cycles require ROOSTOO_API_KEY for account reads.")
+    if not (settings.api_secret and settings.api_secret.strip()):
+        raise ValueError(
+            "Bot cycles require ROOSTOO_API_SECRET for account reads."
+        )
+    if settings.mode is RunMode.LIVE:
+        _validate_base_url(settings.base_url, settings.mode)

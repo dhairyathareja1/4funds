@@ -1,7 +1,9 @@
 import json
 import sqlite3
+import time
 from contextlib import closing
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -23,6 +25,13 @@ class ExecutionRecord:
     created_at_ms: int
     intent: OrderIntent
     result: ExecutionResult
+    result_at_ms: int | None = None
+
+
+@dataclass(frozen=True)
+class ExecutionActivity:
+    filled_order_count: int
+    active_trading_days: tuple[str, ...]
 
 
 class SQLiteExecutionJournal:
@@ -74,16 +83,17 @@ class SQLiteExecutionJournal:
 
     def finish(self, record_id: int, result: ExecutionResult) -> None:
         with closing(self._connect()) as connection, connection:
+            result_at_ms = self._result_timestamp(connection, record_id)
             cursor = connection.execute(
                 """
                 UPDATE execution_records
                 SET status = ?, order_id = ?, filled_quantity = ?,
                     average_fill_price = ?, commission = ?,
                     commission_estimated = ?, wallet_snapshot = ?,
-                    pending_order_count = ?, message = ?
+                    pending_order_count = ?, message = ?, result_at_ms = ?
                 WHERE record_id = ?
                 """,
-                _result_values(result) + (record_id,),
+                _result_values(result) + (result_at_ms, record_id),
             )
             if cursor.rowcount != 1:
                 raise KeyError(f"Execution record {record_id} does not exist.")
@@ -113,6 +123,25 @@ class SQLiteExecutionJournal:
             ).fetchall()
         return tuple(_record_from_row(row) for row in rows)
 
+    def unresolved(self) -> tuple[ExecutionRecord, ...]:
+        with closing(self._connect()) as connection, connection:
+            connection.execute(
+                """
+                UPDATE execution_records
+                SET status = 'UNKNOWN',
+                    message = 'Process stopped before the order outcome was recorded.'
+                WHERE status = 'SUBMITTING'
+                """
+            )
+            rows = connection.execute(
+                """
+                SELECT * FROM execution_records
+                WHERE status IN ('PENDING', 'UNKNOWN')
+                ORDER BY record_id
+                """
+            ).fetchall()
+        return tuple(_record_from_row(row) for row in rows)
+
     def history(self, *, limit: int = 100) -> tuple[ExecutionRecord, ...]:
         if limit <= 0:
             raise ValueError("History limit must be positive.")
@@ -122,6 +151,32 @@ class SQLiteExecutionJournal:
                 (limit,),
             ).fetchall()
         return tuple(_record_from_row(row) for row in reversed(rows))
+
+    def activity(self) -> ExecutionActivity:
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                """
+                SELECT created_at_ms, result_at_ms, filled_quantity
+                FROM execution_records
+                """
+            ).fetchall()
+        active_days: set[str] = set()
+        filled_order_count = 0
+        for row in rows:
+            quantity = Decimal(row["filled_quantity"])
+            if quantity <= 0:
+                continue
+            result_at_ms = row["result_at_ms"]
+            created_at = datetime.fromtimestamp(
+                int(result_at_ms or row["created_at_ms"]) / 1000,
+                tz=timezone.utc,
+            )
+            active_days.add(created_at.date().isoformat())
+            filled_order_count += 1
+        return ExecutionActivity(
+            filled_order_count=filled_order_count,
+            active_trading_days=tuple(sorted(active_days)),
+        )
 
     def resolve_unknown(self, pair: str, result: ExecutionResult) -> None:
         with closing(self._connect()) as connection, connection:
@@ -135,16 +190,19 @@ class SQLiteExecutionJournal:
             ).fetchone()
             if row is None:
                 raise KeyError(f"No unresolved execution exists for {pair}.")
+            result_at_ms = self._result_timestamp(
+                connection, int(row["record_id"])
+            )
             cursor = connection.execute(
                 """
                 UPDATE execution_records
                 SET status = ?, order_id = ?, filled_quantity = ?,
                     average_fill_price = ?, commission = ?,
                     commission_estimated = ?, wallet_snapshot = ?,
-                    pending_order_count = ?, message = ?
+                    pending_order_count = ?, message = ?, result_at_ms = ?
                 WHERE record_id = ?
                 """,
-                _result_values(result) + (row["record_id"],),
+                _result_values(result) + (result_at_ms, row["record_id"]),
             )
             if cursor.rowcount != 1:
                 raise KeyError(f"Execution record for {pair} does not exist.")
@@ -171,10 +229,21 @@ class SQLiteExecutionJournal:
                     commission_estimated INTEGER NOT NULL DEFAULT 0,
                     wallet_snapshot TEXT,
                     pending_order_count INTEGER,
-                    message TEXT NOT NULL DEFAULT ''
+                    message TEXT NOT NULL DEFAULT '',
+                    result_at_ms INTEGER
                 )
                 """
             )
+            columns = {
+                column["name"]
+                for column in connection.execute(
+                    "PRAGMA table_info(execution_records)"
+                ).fetchall()
+            }
+            if "result_at_ms" not in columns:
+                connection.execute(
+                    "ALTER TABLE execution_records ADD COLUMN result_at_ms INTEGER"
+                )
             connection.execute(
                 """
                 CREATE UNIQUE INDEX IF NOT EXISTS one_unresolved_execution_per_pair
@@ -187,6 +256,20 @@ class SQLiteExecutionJournal:
         connection = sqlite3.connect(self._database_path)
         connection.row_factory = sqlite3.Row
         return connection
+
+    def _result_timestamp(
+        self, connection: sqlite3.Connection, record_id: int
+    ) -> int:
+        row = connection.execute(
+            "SELECT filled_quantity, result_at_ms FROM execution_records "
+            "WHERE record_id = ?",
+            (record_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"Execution record {record_id} does not exist.")
+        if Decimal(row["filled_quantity"]) > 0 and row["result_at_ms"] is not None:
+            return int(row["result_at_ms"])
+        return _now_ms()
 
 
 def _result_values(result: ExecutionResult) -> tuple[object, ...]:
@@ -240,9 +323,16 @@ def _record_from_row(row: sqlite3.Row) -> ExecutionRecord:
     return ExecutionRecord(
         record_id=row["record_id"],
         created_at_ms=row["created_at_ms"],
+        result_at_ms=(
+            int(row["result_at_ms"]) if row["result_at_ms"] is not None else None
+        ),
         intent=intent,
         result=result,
     )
+
+
+def _now_ms() -> int:
+    return time.time_ns() // 1_000_000
 
 
 def _decimal_text(value: Decimal | None) -> str | None:
