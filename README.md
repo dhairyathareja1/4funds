@@ -4,7 +4,8 @@
 Hackathon. It includes validated settings, the Roostoo API client, market-history
 storage, the v0 baseline strategy, risk-checked order planning, order execution,
 and hourly cycle orchestration with durable decision logs. Historical backtesting
-is not implemented.
+is available through `run_backtest`; its assumptions and metrics are described
+in [Backtesting](docs/backtesting.md). The replay does not submit orders.
 
 ## v0 strategy
 
