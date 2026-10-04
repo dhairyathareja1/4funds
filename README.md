@@ -81,6 +81,7 @@ Requires Python 3.10 or newer.
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade pip
 python -m pip install -e .
 cp .env.example .env
 ```
@@ -88,8 +89,9 @@ cp .env.example .env
 ### Windows PowerShell
 
 ```powershell
-python -m venv .venv
+ppython -m venv .venv
 .\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 python -m pip install -e .
 Copy-Item .env.example .env
 ```
