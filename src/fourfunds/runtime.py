@@ -249,7 +249,7 @@ class BotRunner:
                 targets, wallet, quotes, rules, self._settings
             )
             risk_state, risk_transitions = self._advance_risk_state(
-                currency, portfolio_value, wallet
+                currency, portfolio_value, wallet, quotes, rules
             )
             plan = self._planner.plan(
                 targets, wallet, quotes, rules, self._settings, risk_state
@@ -368,7 +368,12 @@ class BotRunner:
         return candles, histories, errors, tuple(stale_pairs)
 
     def _advance_risk_state(
-        self, currency: str, current_value: Decimal, wallet: WalletSnapshot
+        self,
+        currency: str,
+        current_value: Decimal,
+        wallet: WalletSnapshot,
+        quotes: Mapping[str, MarketQuote] | None = None,
+        rules: Mapping[str, ExchangeRule] | None = None,
     ) -> tuple[PortfolioRiskState, tuple[dict[str, object], ...]]:
         wallet_time_ms = wallet.server_time_ms
         if wallet_time_ms <= 0 or current_value <= 0:
@@ -404,9 +409,8 @@ class BotRunner:
             drawdown_triggered = drawdown >= self._settings.max_drawdown_fraction
             drawdown_active = previous.drawdown_breaker_active or drawdown_triggered
             cooldown_started_ms = previous.cash_cooldown_started_ms
-            remains_in_cash = all(
-                asset.asset == currency or asset.free + asset.locked == 0
-                for asset in wallet.assets
+            remains_in_cash = self._wallet_is_effectively_cash(
+                currency, wallet, quotes or {}, rules or {}
             )
 
             if drawdown_triggered and not previous.drawdown_breaker_active:
@@ -465,6 +469,48 @@ class BotRunner:
             )
         self._risk_state_store.save(state)
         return state, tuple(transitions)
+
+    @staticmethod
+    def _wallet_is_effectively_cash(
+        currency: str,
+        wallet: WalletSnapshot,
+        quotes: Mapping[str, MarketQuote],
+        rules: Mapping[str, ExchangeRule],
+    ) -> bool:
+        for asset in wallet.assets:
+            if asset.asset == currency:
+                continue
+            if (
+                not isinstance(asset.free, Decimal)
+                or not asset.free.is_finite()
+                or not isinstance(asset.locked, Decimal)
+                or not asset.locked.is_finite()
+                or asset.free < 0
+                or asset.locked < 0
+            ):
+                return False
+            if asset.free + asset.locked == 0:
+                continue
+            if asset.locked > 0:
+                return False
+            pair = f"{asset.asset}/{currency}"
+            quote = quotes.get(pair)
+            rule = rules.get(pair)
+            if (
+                quote is None
+                or quote.pair != pair
+                or rule is None
+                or rule.pair != pair
+                or not isinstance(rule.minimum_order_value, Decimal)
+                or not rule.minimum_order_value.is_finite()
+                or rule.minimum_order_value < 0
+                or not isinstance(quote.bid, Decimal)
+                or not quote.bid.is_finite()
+                or quote.bid <= 0
+                or asset.free * quote.bid >= rule.minimum_order_value
+            ):
+                return False
+        return True
 
     def _finish(
         self, cycle_id: str, decision: dict[str, object], status: str

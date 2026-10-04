@@ -1,3 +1,4 @@
+import sqlite3
 import tempfile
 import unittest
 from dataclasses import replace
@@ -78,6 +79,87 @@ class DrawdownCooldownTests(unittest.TestCase):
         restarted_store = SQLiteRiskStateStore(self.database_path)
         self.assertEqual(restarted_store.load(), expected)
 
+    def test_unsellable_dust_allows_cooldown_recovery(self):
+        self._save_active_cooldown()
+        wallet = WalletSnapshot(
+            self.start_ms + 3 * HOUR_MS,
+            (
+                WalletAsset("USD", Decimal("79.95"), Decimal("0")),
+                WalletAsset("BTC", Decimal("0.0005"), Decimal("0")),
+            ),
+        )
+        quote, rule = self._market_data(minimum="1", bid="100")
+
+        state, transitions = self.runner._advance_risk_state(
+            "USD", Decimal("80"), wallet, quote, rule
+        )
+
+        self.assertFalse(state.drawdown_breaker_active)
+        self.assertEqual(state.high_water_mark, Decimal("80"))
+        self.assertIn("drawdown_recovery", self._event_names(transitions))
+
+    def test_sellable_and_locked_balances_prevent_cooldown_recovery(self):
+        quote, rule = self._market_data(minimum="1", bid="100")
+        wallets = (
+            WalletSnapshot(
+                self.start_ms + 3 * HOUR_MS,
+                (
+                    WalletAsset("USD", Decimal("78"), Decimal("0")),
+                    WalletAsset("BTC", Decimal("0.02"), Decimal("0")),
+                ),
+            ),
+            WalletSnapshot(
+                self.start_ms + 3 * HOUR_MS,
+                (
+                    WalletAsset("USD", Decimal("79.99"), Decimal("0")),
+                    WalletAsset("BTC", Decimal("0"), Decimal("0.0001")),
+                ),
+            ),
+        )
+
+        for wallet in wallets:
+            with self.subTest(wallet=wallet):
+                self._save_active_cooldown()
+                state, transitions = self.runner._advance_risk_state(
+                    "USD", Decimal("80"), wallet, quote, rule
+                )
+                self.assertTrue(state.drawdown_breaker_active)
+                self.assertEqual(state.high_water_mark, Decimal("100"))
+                self.assertNotIn("drawdown_recovery", self._event_names(transitions))
+
+    def test_previous_risk_state_schema_migrates_without_losing_state(self):
+        legacy_database_path = Path(self.temp_dir.name) / "legacy.sqlite3"
+        with sqlite3.connect(legacy_database_path) as connection:
+            connection.execute(
+                """
+                CREATE TABLE portfolio_risk_state (
+                    state_id INTEGER PRIMARY KEY CHECK (state_id = 1),
+                    currency TEXT NOT NULL,
+                    utc_day_start_ms INTEGER NOT NULL,
+                    day_start_value TEXT NOT NULL,
+                    high_water_mark TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO portfolio_risk_state VALUES (1, 'USD', ?, '125.50', '150')
+                """,
+                (200 * DAY_MS,),
+            )
+
+        migrated_store = SQLiteRiskStateStore(legacy_database_path)
+
+        self.assertEqual(
+            migrated_store.load(),
+            PortfolioRiskState(
+                currency="USD",
+                utc_day_start_ms=200 * DAY_MS,
+                day_start_value=Decimal("125.50"),
+                high_water_mark=Decimal("150"),
+            ),
+        )
+
     def test_cooldown_recovery_resets_high_water_and_allows_buys(self):
         with self.assertLogs("fourfunds.runtime", level="WARNING") as captured:
             self.runner._advance_risk_state(
@@ -146,6 +228,43 @@ class DrawdownCooldownTests(unittest.TestCase):
 
     def _event_names(self, events):
         return tuple(event["event"] for event in events)
+
+    def _save_active_cooldown(self):
+        self.store.save(
+            PortfolioRiskState(
+                currency="USD",
+                utc_day_start_ms=200 * DAY_MS,
+                day_start_value=Decimal("100"),
+                high_water_mark=Decimal("100"),
+                drawdown_breaker_active=True,
+                cash_cooldown_started_ms=self.start_ms,
+            )
+        )
+
+    def _market_data(self, minimum, bid):
+        pair = "BTC/USD"
+        return (
+            {
+                pair: MarketQuote(
+                    pair=pair,
+                    server_time_ms=self.start_ms + 3 * HOUR_MS,
+                    bid=Decimal(bid),
+                    ask=Decimal(bid),
+                    last=Decimal(bid),
+                    change_24h=Decimal("0"),
+                    quote_turnover_24h=Decimal("1000"),
+                )
+            },
+            {
+                pair: ExchangeRule(
+                    pair=pair,
+                    can_trade=True,
+                    price_precision=2,
+                    amount_precision=6,
+                    minimum_order_value=Decimal(minimum),
+                )
+            },
+        )
 
     def _wallet(self, timestamp, btc="0"):
         assets = [WalletAsset("USD", Decimal("80"), Decimal("0"))]
